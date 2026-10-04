@@ -88,10 +88,17 @@ auth.onAuthStateChanged(async u=>{
   $('app').style.display='none';$('gate').style.display='none';
   $('login').style.display=u&&!u.isAnonymous?'none':'';$('outBtn').style.display=u&&!u.isAnonymous?'':'none';
   if(!u||u.isAnonymous)return;
+  const g=$('gate');g.style.display='block';
+  g.textContent='Checking admin access… the server may take up to a minute to wake up.';
   try{
-    const r=await fetch(BACKEND+'/api/apps/me',{headers:{Authorization:'Bearer '+await u.getIdToken()}});
-    if((await r.json()).admin){$('app').style.display='block';load();}else $('gate').style.display='block';
-  }catch(e){$('gate').style.display='block';}
+    const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),90000);
+    const r=await fetch(BACKEND+'/api/apps/me',{headers:{Authorization:'Bearer '+await u.getIdToken()},signal:ctl.signal});
+    clearTimeout(tm);
+    if(!r.ok)throw new Error('Server replied '+r.status+'. Is apps-routes.js deployed?');
+    const d=await r.json();
+    if(d.admin){g.style.display='none';$('app').style.display='block';load();}
+    else g.innerHTML='Signed in as <b>'+esc(u.email)+'</b>, but this account is not an admin.<br>Your UID: <code>'+u.uid+'</code><br>Add it to ADMIN_UIDS on Render.';
+  }catch(e){g.textContent='Could not reach the server: '+e.message;}
 });
 async function signIn(){
   try{await auth.signInWithEmailAndPassword($('em').value.trim(),$('pw').value);}
