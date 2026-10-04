@@ -6,7 +6,9 @@
 //      app.use('/api/apps', appsRouter);
 // 3. Render environment variables:
 //      R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET
-//      ADMIN_UIDS   (comma-separated Firebase UIDs allowed to upload)
+//      ADMIN_UIDS   (optional fallback: comma-separated UIDs that are always admins)
+// 3b. Admins are managed in Firestore: collection "admins", document ID = the user's UID
+//     (add one field, e.g. role: "owner"). No redeploy needed to add or remove admins.
 // 4. Firebase Console > Authentication > enable "Anonymous" sign-in (used for ratings)
 
 const express = require('express');
@@ -27,18 +29,21 @@ module.exports = (admin) => {
     credentials: { accessKeyId: process.env.R2_ACCESS_KEY_ID, secretAccessKey: process.env.R2_SECRET_ACCESS_KEY },
   });
 
+  // Admin if listed in Firestore admins/{uid}, or in the ADMIN_UIDS env fallback
+  const isAdmin = async (uid) => ADMINS.includes(uid) || (await db.collection('admins').doc(uid).get()).exists;
+
   const verify = (req) => admin.auth().verifyIdToken((req.headers.authorization || '').replace('Bearer ', ''));
 
   async function requireAdmin(req, res, next) {
     try {
       const d = await verify(req);
-      if (!ADMINS.includes(d.uid)) return res.status(403).json({ error: 'Admins only' });
+      if (!(await isAdmin(d.uid))) return res.status(403).json({ error: 'Admins only' });
       next();
     } catch (e) { res.status(401).json({ error: 'Sign in required' }); }
   }
 
   router.get('/me', async (req, res) => {
-    try { res.json({ admin: ADMINS.includes((await verify(req)).uid) }); }
+    try { res.json({ admin: await isAdmin((await verify(req)).uid) }); }
     catch (e) { res.json({ admin: false }); }
   });
 
@@ -127,6 +132,7 @@ match /apps/{id} {
   allow write: if false;        // only the backend (Admin SDK) writes
   match /ratings/{uid} { allow read, write: if false; }
 }
+match /admins/{uid} { allow read, write: if false; }   // managed in the console only
 
 ---------- R2 bucket CORS (R2 > bucket > Settings > CORS policy) ----------
 [{ "AllowedOrigins": ["https://apps.yourdomain.com"],
