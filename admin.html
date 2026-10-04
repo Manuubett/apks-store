@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Admin | Smart App Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0b0f1a;--surf:#161e2e;--bg3:#1a2235;--border:#263550;--text:#e8f0ff;--text2:#7a90b8;--accent:#3b82f6;--green:#10b981;--red:#ef4444;--gold:#f59e0b}
+@media(prefers-color-scheme:light){:root{--bg:#f0f4f8;--surf:#fff;--bg3:#e8edf5;--border:#c5cfe0;--text:#0f172a;--text2:#475569}}
+body{font-family:'Sora',sans-serif;background:var(--bg);color:var(--text);font-size:14px;min-height:100vh;display:flex;flex-direction:column}
+header{display:flex;justify-content:space-between;align-items:center;padding:14px 24px;border-bottom:1px solid var(--border)}
+header b{font-size:16px}
+main{max-width:900px;width:100%;margin:0 auto;padding:32px 24px;flex:1}
+.btn{padding:8px 16px;border-radius:8px;border:none;font:600 13px 'Sora',sans-serif;cursor:pointer;background:var(--accent);color:#fff}
+.btn.green{background:var(--green)}.btn.red{background:var(--red)}.btn.out{background:none;border:1px solid var(--border);color:var(--text2)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+input,textarea{width:100%;padding:10px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font:14px 'Sora',sans-serif}
+input:focus,textarea:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+label{display:block;font-size:12px;font-weight:600;color:var(--text2);margin:12px 0 5px}
+.panel{background:var(--surf);border:1px solid var(--border);border-radius:12px;padding:22px;margin-bottom:24px}
+h2{font-size:17px;margin-bottom:4px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.bar{height:6px;background:var(--border);border-radius:3px;margin-top:12px;overflow:hidden;display:none}
+.bar i{display:block;height:100%;width:0;background:var(--green);transition:width .2s}
+.item{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--border)}
+.item .ico{font-size:26px;width:44px;height:44px;background:var(--bg3);border-radius:11px;display:grid;place-items:center;flex-shrink:0}
+.item .info{flex:1;min-width:0}.item .n{font-weight:700}.item .m{font-size:11.5px;color:var(--text2)}
+#gate{text-align:center;padding:60px 0;color:var(--text2)}
+#app{display:none}
+footer{border-top:1px solid var(--border);padding:20px;text-align:center;font-size:12.5px;color:var(--text2)}
+footer a{color:var(--accent);text-decoration:none;font-weight:600}
+#toast{position:fixed;bottom:20px;right:20px;background:var(--surf);border:1px solid var(--border);padding:10px 16px;border-radius:8px;display:none;z-index:99}
+@media(max-width:560px){.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header><b>🔐 App Hub Admin</b><button class="btn out" id="outBtn" style="display:none" onclick="auth.signOut()">Sign out</button></header>
+<main>
+  <div class="panel" id="login">
+    <h2>Admin sign in</h2>
+    <label for="em">Email</label><input id="em" type="email" autocomplete="username">
+    <label for="pw">Password</label><input id="pw" type="password" autocomplete="current-password">
+    <button class="btn" style="margin-top:16px;width:100%" onclick="signIn()">Sign in</button>
+  </div>
+  <div id="gate" style="display:none">This account does not have admin access.</div>
+
+  <div id="app">
+    <section class="panel">
+      <h2>Upload a new APK</h2>
+      <div class="row">
+        <div><label for="aName">App name</label><input id="aName" placeholder="My App"></div>
+        <div><label for="aVer">Version</label><input id="aVer" placeholder="1.0.0"></div>
+      </div>
+      <div class="row">
+        <div><label for="aIcon">Icon (one emoji)</label><input id="aIcon" placeholder="📘" maxlength="4"></div>
+        <div><label for="aFile">APK file</label><input type="file" id="aFile" accept=".apk"></div>
+      </div>
+      <label for="aDesc">Description</label><textarea id="aDesc" rows="2"></textarea>
+      <label for="aLog">What's new</label><textarea id="aLog" rows="2"></textarea>
+      <div class="bar" id="bar"><i id="barFill"></i></div>
+      <button class="btn green" style="margin-top:14px" id="upBtn" onclick="upload()">Upload APK</button>
+    </section>
+    <section class="panel">
+      <h2>Published apps</h2>
+      <div id="list"><p class="m" style="color:var(--text2);margin-top:8px">Loading…</p></div>
+    </section>
+  </div>
+</main>
+<footer>Powered by <a href="https://dehemanuelssolutions.co.ke/" target="_blank" rel="noopener">Dehemanuels Solutions</a></footer>
+<div id="toast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+<script>
+firebase.initializeApp({apiKey:"AIzaSyDPZLbDio7OibE-FEXqFF1OdhM0qZc3yII",authDomain:"divine-treat-450709-b5.firebaseapp.com",projectId:"divine-treat-450709-b5",appId:"1:866518506476:web:e2d3618b61f88e1f6a3ec9"});
+const db=firebase.firestore(),auth=firebase.auth(),BACKEND='https://cbe-y1zb.onrender.com';
+const $=id=>document.getElementById(id);
+const esc=s=>String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const mb=b=>(b/1048576).toFixed(1)+' MB';
+function toast(m){const t=$('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',3500);}
+
+auth.onAuthStateChanged(async u=>{
+  $('app').style.display='none';$('gate').style.display='none';
+  $('login').style.display=u&&!u.isAnonymous?'none':'';$('outBtn').style.display=u&&!u.isAnonymous?'':'none';
+  if(!u||u.isAnonymous)return;
+  try{
+    const r=await fetch(BACKEND+'/api/apps/me',{headers:{Authorization:'Bearer '+await u.getIdToken()}});
+    if((await r.json()).admin){$('app').style.display='block';load();}else $('gate').style.display='block';
+  }catch(e){$('gate').style.display='block';}
+});
+async function signIn(){
+  try{await auth.signInWithEmailAndPassword($('em').value.trim(),$('pw').value);}
+  catch(e){toast('Sign in failed: '+e.message.replace('Firebase: ',''));}
+}
+async function api(path,body){
+  const r=await fetch(BACKEND+path,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+await auth.currentUser.getIdToken()},body:JSON.stringify(body)});
+  const d=await r.json();if(!r.ok)throw new Error(d.error||'Request failed');return d;
+}
+async function load(){
+  const s=await db.collection('apps').orderBy('createdAt','desc').get();
+  $('list').innerHTML=s.empty?'<p style="color:var(--text2);margin-top:8px">No apps uploaded yet.</p>':s.docs.map(d=>{
+    const a=d.data(),n=a.ratingCount||0,avg=n?(a.ratingSum/n).toFixed(1)+' ★ ('+n+')':'no ratings';
+    return `<div class="item"><div class="ico">${esc(a.icon)||'📦'}</div>
+      <div class="info"><div class="n">${esc(a.name)} <span class="m">v${esc(a.version)}</span></div>
+      <div class="m">${mb(a.size||0)} · ${a.downloads||0} downloads · ${avg}</div></div>
+      <button class="btn red" onclick="del('${d.id}')">Delete</button></div>`;
+  }).join('');
+}
+async function upload(){
+  const f=$('aFile').files[0],name=$('aName').value.trim(),version=$('aVer').value.trim();
+  if(!f||!name||!version){toast('Add a name, version and APK file');return;}
+  if(!f.name.toLowerCase().endsWith('.apk')){toast('Choose a .apk file');return;}
+  $('upBtn').disabled=true;$('bar').style.display='block';
+  try{
+    const {uploadUrl,key}=await api('/api/apps/upload-url',{filename:f.name,size:f.size});
+    await new Promise((ok,fail)=>{
+      const x=new XMLHttpRequest();x.open('PUT',uploadUrl);
+      x.setRequestHeader('Content-Type','application/vnd.android.package-archive');
+      x.upload.onprogress=e=>{$('barFill').style.width=(e.loaded/e.total*100)+'%';};
+      x.onload=()=>x.status<300?ok():fail(new Error('Upload failed ('+x.status+'). Check R2 CORS.'));
+      x.onerror=()=>fail(new Error('Network error. Check R2 CORS settings.'));
+      x.send(f);
+    });
+    await api('/api/apps/create',{key,name,version,size:f.size,icon:$('aIcon').value.trim(),desc:$('aDesc').value.trim(),changelog:$('aLog').value.trim()});
+    toast('Uploaded: '+name);
+    ['aName','aVer','aIcon','aDesc','aLog','aFile'].forEach(i=>$(i).value='');load();
+  }catch(e){toast(e.message);}
+  $('upBtn').disabled=false;$('bar').style.display='none';$('barFill').style.width='0';
+}
+async function del(id){
+  if(!confirm('Delete this app and its APK file?'))return;
+  try{await api('/api/apps/delete',{appId:id});toast('Deleted');load();}catch(e){toast(e.message);}
+}
+</script>
+</body>
+</html>
