@@ -43,7 +43,8 @@ h2{font-family:'Fraunces',serif;font-size:1.3rem;font-weight:700;letter-spacing:
 .prog{height:6px;background:var(--paper3);border-radius:3px;margin-top:16px;overflow:hidden;display:none}
 .prog i{display:block;height:100%;width:0;background:var(--green);transition:width .2s}
 .item{display:flex;align-items:center;gap:14px;padding:14px 0;border-top:1px solid var(--paper3);flex-wrap:wrap}
-.item .ico{font-size:26px;width:46px;height:46px;background:var(--paper2);border-radius:12px;display:grid;place-items:center;flex-shrink:0}
+.item .ico{font-size:26px;width:46px;height:46px;background:var(--paper2);border-radius:12px;display:grid;place-items:center;flex-shrink:0;overflow:hidden}
+.item .ico img{width:100%;height:100%;object-fit:cover;display:block}
 .info{flex:1;min-width:160px}.n{font-family:'Fraunces',serif;font-weight:700}
 .m{font-family:'Fira Code',monospace;font-size:.68rem;color:var(--ink3)}
 .acts{display:flex;gap:8px;flex-wrap:wrap}
@@ -67,7 +68,7 @@ footer a{color:rgba(255,255,255,.6);text-decoration:none;font-weight:600}
 
 <main>
   <h1>App Store admin</h1>
-  <p class="sub">Upload APKs, set preview images, check downloads and ratings, and remove old versions.</p>
+  <p class="sub">Upload APKs, set app icons and preview images, check downloads and ratings, and remove old versions.</p>
 
   <div class="panel" id="login" style="max-width:440px">
     <h2>Sign in</h2>
@@ -85,9 +86,10 @@ footer a{color:rgba(255,255,255,.6);text-decoration:none;font-weight:600}
         <div><label for="aVer">Version</label><input id="aVer" placeholder="1.0.0"></div>
       </div>
       <div class="row">
-        <div><label for="aIcon">Icon (one emoji)</label><input id="aIcon" placeholder="📘" maxlength="4"></div>
+        <div><label for="aIcon">Icon (image link or one emoji)</label><input id="aIcon" placeholder="https://.../icon.png or 📘" maxlength="300"></div>
         <div><label for="aFile">APK file</label><input type="file" id="aFile" accept=".apk"></div>
       </div>
+      <div class="hint">For a real icon, use a square PNG or JPG (512×512, under 100 KB) with a link starting with https://</div>
       <label for="aOg">Preview image link (optional)</label>
       <input id="aOg" type="url" placeholder="https://dehemanuelssolutions.co.ke/og/myapp.jpg">
       <div class="hint">Shown when the app is shared on WhatsApp. Use a 1200×630 JPG or PNG under 300 KB, starting with https://</div>
@@ -116,7 +118,9 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const mb=b=>(b/1048576).toFixed(1)+' MB';
 const isHttps=u=>/^https:\/\/\S+$/i.test(u);
-const ogById={};
+const isIcon=v=>!v||isHttps(v)||[...v].length<=4;
+const iconHtml=v=>isHttps(v||'')?`<img src="${esc(v)}" alt="" onerror="this.replaceWith('📦')">`:(esc(v)||'📦');
+const ogById={},iconById={};
 function toast(m){const t=$('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',3500);}
 
 auth.onAuthStateChanged(async u=>{
@@ -149,10 +153,12 @@ async function load(){
   $('list').innerHTML=s.empty?'<p class="m" style="margin-top:10px">No apps uploaded yet.</p>':s.docs.map(d=>{
     const a=d.data(),n=a.ratingCount||0,avg=n?(a.ratingSum/n).toFixed(1)+' ★ ('+n+')':'no ratings';
     ogById[d.id]=a.ogImage||'';
-    return `<div class="item"><div class="ico">${esc(a.icon)||'📦'}</div>
+    iconById[d.id]=a.icon||'';
+    return `<div class="item"><div class="ico">${iconHtml(a.icon)}</div>
       <div class="info"><div class="n">${esc(a.name)} <span class="m">v${esc(a.version)}</span></div>
       <div class="m">${mb(a.size||0)} · ${a.downloads||0} downloads · ${avg} · ${a.ogImage?'preview image set':'no preview image'}</div></div>
-      <div class="acts"><button class="btn out sm" onclick="setImage('${d.id}')">Preview image</button>
+      <div class="acts"><button class="btn out sm" onclick="setIcon('${d.id}')">Icon</button>
+      <button class="btn out sm" onclick="setImage('${d.id}')">Preview image</button>
       <button class="btn out sm" onclick="del('${d.id}')">Delete</button></div></div>`;
   }).join('');
 }
@@ -161,6 +167,8 @@ async function upload(){
   if(!f||!name||!version){toast('Add a name, version and APK file');return;}
   if(!f.name.toLowerCase().endsWith('.apk')){toast('Choose a .apk file');return;}
   if(og&&!isHttps(og)){toast('Preview image link must start with https://');return;}
+  const ic=$('aIcon').value.trim();
+  if(!isIcon(ic)){toast('Icon must be one emoji or an https:// image link');return;}
   $('upBtn').disabled=true;$('bar').style.display='block';
   try{
     const {uploadUrl,key}=await api('/api/apps/upload-url',{filename:f.name,size:f.size});
@@ -172,11 +180,19 @@ async function upload(){
       x.onerror=()=>fail(new Error('Network error. Check R2 CORS settings.'));
       x.send(f);
     });
-    await api('/api/apps/create',{key,name,version,size:f.size,icon:$('aIcon').value.trim(),desc:$('aDesc').value.trim(),changelog:$('aLog').value.trim(),ogImage:og});
+    await api('/api/apps/create',{key,name,version,size:f.size,icon:ic,desc:$('aDesc').value.trim(),changelog:$('aLog').value.trim(),ogImage:og});
     toast('Uploaded: '+name);
     ['aName','aVer','aIcon','aOg','aDesc','aLog','aFile'].forEach(i=>$(i).value='');load();
   }catch(e){toast(e.message);}
   $('upBtn').disabled=false;$('bar').style.display='none';$('barFill').style.width='0';
+}
+async function setIcon(id){
+  const v=prompt('Paste an https image link for the icon, or type one emoji.\nLeave empty to use the default 📦.',iconById[id]||'');
+  if(v===null)return;
+  const val=v.trim();
+  if(!isIcon(val)){toast('Use one emoji or a link starting with https://');return;}
+  try{await api('/api/apps/update',{appId:id,icon:val});toast('Icon saved');load();}
+  catch(e){toast(e.message);}
 }
 async function setImage(id){
   const v=prompt('Paste the https link to the preview image.\nLeave empty to remove it.',ogById[id]||'');
