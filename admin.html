@@ -54,6 +54,9 @@ h2{font-family:'Fraunces',serif;font-size:1.3rem;font-weight:700;letter-spacing:
 footer{background:var(--ink);padding:28px 5vw;text-align:center;font-size:.78rem;color:rgba(255,255,255,.35)}
 footer a{color:rgba(255,255,255,.6);text-decoration:none;font-weight:600}
 #toast{position:fixed;bottom:20px;right:20px;background:var(--ink);color:#fff;padding:12px 18px;border-radius:10px;font-size:.84rem;display:none;z-index:999}
+.feat{display:grid;gap:6px;padding:12px;border:1px solid var(--paper3);border-radius:12px;margin-bottom:8px;background:var(--paper)}
+.feat .btn{justify-self:start}
+.edit-bar{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 @media(max-width:560px){.row{grid-template-columns:1fr}.tag{display:none}}
 </style>
 </head>
@@ -68,7 +71,7 @@ footer a{color:rgba(255,255,255,.6);text-decoration:none;font-weight:600}
 
 <main>
   <h1>App Store admin</h1>
-  <p class="sub">Upload APKs, set app icons and preview images, check downloads and ratings, and remove old versions.</p>
+  <p class="sub">Upload APKs, edit app details and features, check downloads and ratings, and remove old versions.</p>
 
   <div class="panel" id="login" style="max-width:440px">
     <h2>Sign in</h2>
@@ -79,24 +82,31 @@ footer a{color:rgba(255,255,255,.6);text-decoration:none;font-weight:600}
   <div id="gate"></div>
 
   <div id="app">
-    <section class="panel">
-      <h2>Upload a new APK</h2>
+    <section class="panel" id="formPanel">
+      <h2 id="formTitle">Upload a new APK</h2>
       <div class="row">
         <div><label for="aName">App name</label><input id="aName" placeholder="My App"></div>
         <div><label for="aVer">Version</label><input id="aVer" placeholder="1.0.0"></div>
       </div>
       <div class="row">
         <div><label for="aIcon">Icon (image link or one emoji)</label><input id="aIcon" placeholder="https://.../icon.png or 📘" maxlength="300"></div>
-        <div><label for="aFile">APK file</label><input type="file" id="aFile" accept=".apk"></div>
+        <div id="fileWrap"><label for="aFile">APK file</label><input type="file" id="aFile" accept=".apk"></div>
       </div>
       <div class="hint">For a real icon, use a square PNG or JPG (512×512, under 100 KB) with a link starting with https://</div>
       <label for="aOg">Preview image link (optional)</label>
       <input id="aOg" type="url" placeholder="https://dehemanuelssolutions.co.ke/og/myapp.jpg">
       <div class="hint">Shown when the app is shared on WhatsApp. Use a 1200×630 JPG or PNG under 300 KB, starting with https://</div>
-      <label for="aDesc">Description</label><textarea id="aDesc" rows="2"></textarea>
-      <label for="aLog">What's new</label><textarea id="aLog" rows="2"></textarea>
+      <label for="aDesc">Description</label><textarea id="aDesc" rows="7" maxlength="5000" placeholder="Title, intro, why choose it, who it is for. Line breaks are kept."></textarea>
+      <div class="hint">Put the key features in the section below so they show as a numbered list in the store.</div>
+      <label>Key features</label>
+      <div id="feats"></div>
+      <button type="button" class="btn out sm" onclick="addFeat()">+ Add feature</button>
+      <label for="aLog">What's new</label><textarea id="aLog" rows="2" maxlength="1000"></textarea>
       <div class="prog" id="bar"><i id="barFill"></i></div>
-      <button class="btn green" style="margin-top:18px" id="upBtn" onclick="upload()">Upload APK</button>
+      <div class="edit-bar">
+        <button class="btn green" id="upBtn" onclick="upload()">Upload APK</button>
+        <button class="btn out" id="cancelEdit" style="display:none" onclick="resetForm()">Cancel edit</button>
+      </div>
     </section>
     <section class="panel">
       <h2>Published apps</h2>
@@ -120,7 +130,6 @@ const mb=b=>(b/1048576).toFixed(1)+' MB';
 const isHttps=u=>/^https:\/\/\S+$/i.test(u);
 const isIcon=v=>!v||isHttps(v)||[...v].length<=4;
 const iconHtml=v=>isHttps(v||'')?`<img src="${esc(v)}" alt="" onerror="this.replaceWith('📦')">`:(esc(v)||'📦');
-const ogById={},iconById={};
 function toast(m){const t=$('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',3500);}
 
 auth.onAuthStateChanged(async u=>{
@@ -148,27 +157,63 @@ async function api(path,body){
   const r=await fetch(BACKEND+path,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+await auth.currentUser.getIdToken()},body:JSON.stringify(body)});
   const d=await r.json();if(!r.ok)throw new Error(d.error||'Request failed');return d;
 }
+const appsById={};let editId=null;
+function addFeat(t,x){
+  const d=document.createElement('div');d.className='feat';
+  d.innerHTML='<input class="ft" placeholder="Feature title" maxlength="120" aria-label="Feature title"><textarea class="fx" rows="2" maxlength="600" placeholder="Short description" aria-label="Feature description"></textarea><button type="button" class="btn out sm" onclick="this.parentNode.remove()">Remove</button>';
+  d.querySelector('.ft').value=t||'';d.querySelector('.fx').value=x||'';
+  $('feats').appendChild(d);
+}
+const getFeats=()=>[...document.querySelectorAll('#feats .feat')].map(r=>({title:r.querySelector('.ft').value.trim(),text:r.querySelector('.fx').value.trim()})).filter(f=>f.title||f.text);
+function resetForm(){
+  editId=null;
+  ['aName','aVer','aIcon','aOg','aDesc','aLog','aFile'].forEach(i=>$(i).value='');
+  $('feats').innerHTML='';
+  $('formTitle').textContent='Upload a new APK';
+  $('upBtn').textContent='Upload APK';
+  $('cancelEdit').style.display='none';
+  $('fileWrap').style.display='';
+}
+function editApp(id){
+  const a=appsById[id];if(!a)return;
+  resetForm();editId=id;
+  $('aName').value=a.name||'';$('aVer').value=a.version||'';$('aIcon').value=a.icon||'';
+  $('aOg').value=a.ogImage||'';$('aDesc').value=a.desc||'';$('aLog').value=a.changelog||'';
+  (a.features||[]).forEach(f=>addFeat(f.title,f.text));
+  $('formTitle').textContent='Edit: '+(a.name||'app');
+  $('upBtn').textContent='Save changes';
+  $('cancelEdit').style.display='';
+  $('fileWrap').style.display='none';
+  $('formPanel').scrollIntoView({behavior:'smooth'});
+}
 async function load(){
   const s=await db.collection('apps').orderBy('createdAt','desc').get();
   $('list').innerHTML=s.empty?'<p class="m" style="margin-top:10px">No apps uploaded yet.</p>':s.docs.map(d=>{
     const a=d.data(),n=a.ratingCount||0,avg=n?(a.ratingSum/n).toFixed(1)+' ★ ('+n+')':'no ratings';
-    ogById[d.id]=a.ogImage||'';
-    iconById[d.id]=a.icon||'';
+    appsById[d.id]=a;
+    const fc=(a.features||[]).length;
     return `<div class="item"><div class="ico">${iconHtml(a.icon)}</div>
       <div class="info"><div class="n">${esc(a.name)} <span class="m">v${esc(a.version)}</span></div>
-      <div class="m">${mb(a.size||0)} · ${a.downloads||0} downloads · ${avg} · ${a.ogImage?'preview image set':'no preview image'}</div></div>
-      <div class="acts"><button class="btn out sm" onclick="setIcon('${d.id}')">Icon</button>
-      <button class="btn out sm" onclick="setImage('${d.id}')">Preview image</button>
+      <div class="m">${mb(a.size||0)} · ${a.downloads||0} downloads · ${avg} · ${fc} feature${fc===1?'':'s'} · ${a.ogImage?'preview image set':'no preview image'}</div></div>
+      <div class="acts"><button class="btn out sm" onclick="editApp('${d.id}')">Edit</button>
       <button class="btn out sm" onclick="del('${d.id}')">Delete</button></div></div>`;
   }).join('');
 }
 async function upload(){
-  const f=$('aFile').files[0],name=$('aName').value.trim(),version=$('aVer').value.trim(),og=$('aOg').value.trim();
-  if(!f||!name||!version){toast('Add a name, version and APK file');return;}
-  if(!f.name.toLowerCase().endsWith('.apk')){toast('Choose a .apk file');return;}
+  const name=$('aName').value.trim(),version=$('aVer').value.trim(),og=$('aOg').value.trim(),ic=$('aIcon').value.trim();
+  const body={name,version,icon:ic,desc:$('aDesc').value.trim(),changelog:$('aLog').value.trim(),ogImage:og,features:getFeats()};
+  if(!name||!version){toast('Add a name and version');return;}
   if(og&&!isHttps(og)){toast('Preview image link must start with https://');return;}
-  const ic=$('aIcon').value.trim();
   if(!isIcon(ic)){toast('Icon must be one emoji or an https:// image link');return;}
+  if(editId){
+    $('upBtn').disabled=true;
+    try{await api('/api/apps/update',{appId:editId,...body});toast('Changes saved');resetForm();load();}
+    catch(e){toast(e.message);}
+    $('upBtn').disabled=false;return;
+  }
+  const f=$('aFile').files[0];
+  if(!f){toast('Choose an APK file');return;}
+  if(!f.name.toLowerCase().endsWith('.apk')){toast('Choose a .apk file');return;}
   $('upBtn').disabled=true;$('bar').style.display='block';
   try{
     const {uploadUrl,key}=await api('/api/apps/upload-url',{filename:f.name,size:f.size});
@@ -180,27 +225,11 @@ async function upload(){
       x.onerror=()=>fail(new Error('Network error. Check R2 CORS settings.'));
       x.send(f);
     });
-    await api('/api/apps/create',{key,name,version,size:f.size,icon:ic,desc:$('aDesc').value.trim(),changelog:$('aLog').value.trim(),ogImage:og});
+    await api('/api/apps/create',{key,size:f.size,...body});
     toast('Uploaded: '+name);
-    ['aName','aVer','aIcon','aOg','aDesc','aLog','aFile'].forEach(i=>$(i).value='');load();
+    resetForm();load();
   }catch(e){toast(e.message);}
   $('upBtn').disabled=false;$('bar').style.display='none';$('barFill').style.width='0';
-}
-async function setIcon(id){
-  const v=prompt('Paste an https image link for the icon, or type one emoji.\nLeave empty to use the default 📦.',iconById[id]||'');
-  if(v===null)return;
-  const val=v.trim();
-  if(!isIcon(val)){toast('Use one emoji or a link starting with https://');return;}
-  try{await api('/api/apps/update',{appId:id,icon:val});toast('Icon saved');load();}
-  catch(e){toast(e.message);}
-}
-async function setImage(id){
-  const v=prompt('Paste the https link to the preview image.\nLeave empty to remove it.',ogById[id]||'');
-  if(v===null)return;
-  const url=v.trim();
-  if(url&&!isHttps(url)){toast('Link must start with https://');return;}
-  try{await api('/api/apps/update',{appId:id,ogImage:url});toast('Preview image saved');load();}
-  catch(e){toast(e.message);}
 }
 async function del(id){
   if(!confirm('Delete this app and its APK file?'))return;
