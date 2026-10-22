@@ -90,7 +90,7 @@ footer a{color:rgba(255,255,255,.6);text-decoration:none;font-weight:600}
       </div>
       <div class="row">
         <div><label for="aIcon">Icon (image link or one emoji)</label><input id="aIcon" placeholder="https://.../icon.png or 📘" maxlength="300"></div>
-        <div id="fileWrap"><label for="aFile">APK file</label><input type="file" id="aFile" accept=".apk"></div>
+        <div id="fileWrap"><label for="aFile" id="fileLbl">APK file</label><input type="file" id="aFile" accept=".apk"></div>
       </div>
       <div class="hint">For a real icon, use a square PNG or JPG (512×512, under 100 KB) with a link starting with https://</div>
       <label for="aOg">Preview image link (optional)</label>
@@ -157,7 +157,7 @@ async function api(path,body){
   const r=await fetch(BACKEND+path,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+await auth.currentUser.getIdToken()},body:JSON.stringify(body)});
   const d=await r.json();if(!r.ok)throw new Error(d.error||'Request failed');return d;
 }
-const appsById={};let editId=null;
+const appsById={};let editId=null,nvMode=false;
 function addFeat(t,x){
   const d=document.createElement('div');d.className='feat';
   d.innerHTML='<input class="ft" placeholder="Feature title" maxlength="120" aria-label="Feature title"><textarea class="fx" rows="2" maxlength="600" placeholder="Short description" aria-label="Feature description"></textarea><button type="button" class="btn out sm" onclick="this.parentNode.remove()">Remove</button>';
@@ -166,25 +166,26 @@ function addFeat(t,x){
 }
 const getFeats=()=>[...document.querySelectorAll('#feats .feat')].map(r=>({title:r.querySelector('.ft').value.trim(),text:r.querySelector('.fx').value.trim()})).filter(f=>f.title||f.text);
 function resetForm(){
-  editId=null;
+  editId=null;nvMode=false;
   ['aName','aVer','aIcon','aOg','aDesc','aLog','aFile'].forEach(i=>$(i).value='');
   $('feats').innerHTML='';
   $('formTitle').textContent='Upload a new APK';
   $('upBtn').textContent='Upload APK';
   $('cancelEdit').style.display='none';
-  $('fileWrap').style.display='';
+  $('fileLbl').textContent='APK file';
 }
-function editApp(id){
+function editApp(id,nv){
   const a=appsById[id];if(!a)return;
-  resetForm();editId=id;
+  resetForm();editId=id;nvMode=!!nv;
   $('aName').value=a.name||'';$('aVer').value=a.version||'';$('aIcon').value=a.icon||'';
   $('aOg').value=a.ogImage||'';$('aDesc').value=a.desc||'';$('aLog').value=a.changelog||'';
   (a.features||[]).forEach(f=>addFeat(f.title,f.text));
-  $('formTitle').textContent='Edit: '+(a.name||'app');
+  $('formTitle').textContent=(nv?'New version of: ':'Edit: ')+(a.name||'app');
   $('upBtn').textContent='Save changes';
   $('cancelEdit').style.display='';
-  $('fileWrap').style.display='none';
+  $('fileLbl').textContent=nv?'New APK file':'New APK file (optional, replaces the current one)';
   $('formPanel').scrollIntoView({behavior:'smooth'});
+  if(nv){$('aLog').value='';$('aVer').focus();$('aVer').select();}
 }
 async function load(){
   const s=await db.collection('apps').orderBy('createdAt','desc').get();
@@ -195,9 +196,22 @@ async function load(){
     return `<div class="item"><div class="ico">${iconHtml(a.icon)}</div>
       <div class="info"><div class="n">${esc(a.name)} <span class="m">v${esc(a.version)}</span></div>
       <div class="m">${mb(a.size||0)} · ${a.downloads||0} downloads · ${avg} · ${fc} feature${fc===1?'':'s'} · ${a.ogImage?'preview image set':'no preview image'}</div></div>
-      <div class="acts"><button class="btn out sm" onclick="editApp('${d.id}')">Edit</button>
+      <div class="acts"><button class="btn green sm" onclick="editApp('${d.id}',true)">New version</button>
+      <button class="btn out sm" onclick="editApp('${d.id}')">Edit</button>
       <button class="btn out sm" onclick="del('${d.id}')">Delete</button></div></div>`;
   }).join('');
+}
+async function putApk(f){
+  const {uploadUrl,key}=await api('/api/apps/upload-url',{filename:f.name,size:f.size});
+  await new Promise((ok,fail)=>{
+    const x=new XMLHttpRequest();x.open('PUT',uploadUrl);
+    x.setRequestHeader('Content-Type','application/vnd.android.package-archive');
+    x.upload.onprogress=e=>{$('barFill').style.width=(e.loaded/e.total*100)+'%';};
+    x.onload=()=>x.status<300?ok():fail(new Error('Upload failed ('+x.status+'). Check R2 CORS.'));
+    x.onerror=()=>fail(new Error('Network error. Check R2 CORS settings.'));
+    x.send(f);
+  });
+  return key;
 }
 async function upload(){
   const name=$('aName').value.trim(),version=$('aVer').value.trim(),og=$('aOg').value.trim(),ic=$('aIcon').value.trim();
@@ -206,25 +220,29 @@ async function upload(){
   if(og&&!isHttps(og)){toast('Preview image link must start with https://');return;}
   if(!isIcon(ic)){toast('Icon must be one emoji or an https:// image link');return;}
   if(editId){
+    const nf=$('aFile').files[0],cur=appsById[editId]||{};
+    if(nvMode&&!nf){toast('Choose the new APK file');return;}
+    if(nf&&!nf.name.toLowerCase().endsWith('.apk')){toast('Choose a .apk file');return;}
+    if(nf&&version===cur.version&&!confirm('The version number is still '+version+'. Continue?'))return;
     $('upBtn').disabled=true;
-    try{await api('/api/apps/update',{appId:editId,...body});toast('Changes saved');resetForm();load();}
-    catch(e){toast(e.message);}
-    $('upBtn').disabled=false;return;
+    if(nf)$('bar').style.display='block';
+    try{
+      if(nf){
+        const key=await putApk(nf);
+        await api('/api/apps/new-version',{appId:editId,key,size:nf.size,version,changelog:body.changelog});
+      }
+      await api('/api/apps/update',{appId:editId,...body});
+      toast(nf?'New version published':'Changes saved');resetForm();load();
+    }catch(e){toast(e.message);}
+    $('upBtn').disabled=false;$('bar').style.display='none';$('barFill').style.width='0';
+    return;
   }
   const f=$('aFile').files[0];
   if(!f){toast('Choose an APK file');return;}
   if(!f.name.toLowerCase().endsWith('.apk')){toast('Choose a .apk file');return;}
   $('upBtn').disabled=true;$('bar').style.display='block';
   try{
-    const {uploadUrl,key}=await api('/api/apps/upload-url',{filename:f.name,size:f.size});
-    await new Promise((ok,fail)=>{
-      const x=new XMLHttpRequest();x.open('PUT',uploadUrl);
-      x.setRequestHeader('Content-Type','application/vnd.android.package-archive');
-      x.upload.onprogress=e=>{$('barFill').style.width=(e.loaded/e.total*100)+'%';};
-      x.onload=()=>x.status<300?ok():fail(new Error('Upload failed ('+x.status+'). Check R2 CORS.'));
-      x.onerror=()=>fail(new Error('Network error. Check R2 CORS settings.'));
-      x.send(f);
-    });
+    const key=await putApk(f);
     await api('/api/apps/create',{key,size:f.size,...body});
     toast('Uploaded: '+name);
     resetForm();load();
